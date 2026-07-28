@@ -74,6 +74,6 @@
 - 加入更多季度的資料，觀察更長期的價格趨勢
 
 ## 作者
-
+Willy Lin
 如果你對這個專案有任何問題或建議，歡迎與我聯絡。
-Mail:gn02908107@hotmail.com
+Mail: gn02908107@hotmail.com
