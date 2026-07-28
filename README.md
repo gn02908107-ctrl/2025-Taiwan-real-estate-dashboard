@@ -5,8 +5,7 @@
 
 ## Demo
 
-> 部署後可在此貼上 Streamlit Cloud 的網址
-> 例如：`https://your-app-name.streamlit.app`
+> LINK：https://taiwan-real-estate-dashboard-kmu6tjceclycvdbic6s5zn.streamlit.app
 
 ## 專案動機
 
@@ -77,3 +76,4 @@
 ## 作者
 
 如果你對這個專案有任何問題或建議，歡迎與我聯絡。
+Mail:gn02908107@hotmail.com
