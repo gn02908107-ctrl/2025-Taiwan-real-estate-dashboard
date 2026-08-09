@@ -3,9 +3,7 @@
 用政府公開的實價登錄資料，打造一個可互動篩選的全國房地產交易分析工具，
 涵蓋全台 21 縣市、S1~S4 共四季的交易資料。
 
-## Demo
-
-> LINK：https://taiwan-real-estate-dashboard-kmu6tjceclycvdbic6s5zn.streamlit.app
+**🔗 [線上 Demo](https://taiwan-real-estate-dashboard-kmu6tjceclycvdbic6s5zn.streamlit.app/)**
 
 ## 專案動機
 
