@@ -82,7 +82,7 @@ def extract_road_name(address):
 data = load_all_data()
 
 if data.empty:
-    st.warning("找不到資料庫檔案,請確認 全國房屋實價登錄資料.db 是否放在與 dashboard.py 相同的資料夾下。")
+    st.warning("找不到資料庫檔案,請確認 Database 資料夾（內含 全國房屋實價登錄資料.db）是否與 dashboard.py 放在同一層。")
     st.stop()
 
 SEASON_ORDER = ["S1", "S2", "S3", "S4"]
