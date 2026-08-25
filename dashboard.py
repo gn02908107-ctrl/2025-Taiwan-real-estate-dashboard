@@ -11,7 +11,7 @@ st.set_page_config(page_title="全國房地產交易分析", layout="wide")
 st.title("🏠 114年度全國房地產交易分析")
 st.caption("資料來源:內政部不動產交易實價查詢服務網（實價登錄）")
 
-DB_PATH = "全國房屋實價登錄資料.db"
+DB_PATH = "Database/全國房屋實價登錄資料.db"
 
 # 資料表命名格式:S1_台北市房地產交易資料_不含車位(中古屋)
 TABLE_PATTERN = re.compile(
