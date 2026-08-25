@@ -99,6 +99,18 @@ def format_roc_date(value):
         return s
 
 
+def strip_parentheses(text):
+    """
+    移除文字中的括號及括號內的內容（同時處理全形／半形括號）。
+    例如:住宅大樓(11層含以上有電梯) -> 住宅大樓
+    """
+    if pd.isna(text):
+        return text
+    s = str(text)
+    s = re.sub(r"[（(].*?[）)]", "", s)
+    return s.strip()
+
+
 data = load_all_data()
 
 if data.empty:
@@ -334,16 +346,13 @@ st.altair_chart(type_bar, use_container_width=True)
 # ------------------------------------------------------------
 st.subheader("篩選後的原始資料")
 
-# 欄位顯示用中文名稱對照（沒有列在這裡的欄位會直接用原始欄名）
+# 欄位顯示用中文名稱對照（沒有列在這裡的欄位會直接用原始欄名，也不會出現在勾選選單中）
 COLUMN_LABELS = {
-    "縣市": "縣市",
     "鄉鎮市區": "鄉鎮市區",
-    "行政區": "行政區（縣市+鄉鎮市區）",
     "土地位置建物門牌": "門牌（僅顯示路名）",
     "交易標的": "交易標的",
     "主要用途": "主要用途",
     "房屋類型": "房屋類型",
-    "含車位": "含車位",
     "季度": "季度",
     "交易年月日": "交易日期",
     "移轉層次": "移轉層次",
@@ -354,16 +363,14 @@ COLUMN_LABELS = {
     "建物現況格局-房": "房數",
     "建物現況格局-廳": "廳數",
     "建物現況格局-衛": "衛浴數",
-    "建物移轉總面積平方公尺": "移轉面積（平方公尺）",
     "總坪數": "總坪數",
     "總價元": "總價（元）",
-    "單價元平方公尺": "單價（元/平方公尺）",
     "單價_萬元每坪": "單價（萬元/坪）",
 }
 
 # 預設勾選的精選欄位（只取資料裡實際存在的欄位，避免舊資料表缺欄位時報錯）
 DEFAULT_COLUMNS = [
-    "縣市", "鄉鎮市區", "土地位置建物門牌", "房屋類型", "含車位", "季度",
+    "鄉鎮市區", "土地位置建物門牌", "房屋類型", "季度",
     "交易年月日", "建物型態", "屋齡",
     "建物現況格局-房", "建物現況格局-廳", "建物現況格局-衛",
     "總坪數", "單價_萬元每坪",
@@ -390,6 +397,8 @@ else:
         display_df["交易年月日"] = display_df["交易年月日"].apply(format_roc_date)
     if "建築完成年月" in display_df.columns:
         display_df["建築完成年月"] = display_df["建築完成年月"].apply(format_roc_date)
+    if "建物型態" in display_df.columns:
+        display_df["建物型態"] = display_df["建物型態"].apply(strip_parentheses)
 
     display_df = display_df.rename(columns=COLUMN_LABELS)
     st.dataframe(display_df, use_container_width=True)
