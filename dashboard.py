@@ -79,6 +79,26 @@ def extract_road_name(address):
     return text
 
 
+def format_roc_date(value):
+    """
+    把民國年格式的日期字串（例如 0900727 或 1130319）轉成可讀格式。
+    從右邊切，避免年份是 2 碼或 3 碼長度不一造成誤判
+    （例如 0900727 -> 民國90年07月27日，1130319 -> 民國113年03月19日）。
+    """
+    if pd.isna(value):
+        return value
+    s = str(value).strip()
+    if len(s) < 5:
+        return s
+    year_part = s[:-4]
+    month = s[-4:-2]
+    day = s[-2:]
+    try:
+        return f"民國{int(year_part)}年{month}月{day}日"
+    except ValueError:
+        return s
+
+
 data = load_all_data()
 
 if data.empty:
@@ -310,17 +330,73 @@ st.altair_chart(type_bar, use_container_width=True)
 
 
 # ------------------------------------------------------------
-# 原始資料表（門牌只顯示到路名，可下載完整版）
+# 原始資料表（可自選要顯示的欄位；門牌只顯示到路名，可下載完整版）
 # ------------------------------------------------------------
 st.subheader("篩選後的原始資料")
 
-display_df = filtered.copy()
-display_df["土地位置建物門牌"] = display_df["土地位置建物門牌"].apply(extract_road_name)
-st.dataframe(display_df, use_container_width=True)
+# 欄位顯示用中文名稱對照（沒有列在這裡的欄位會直接用原始欄名）
+COLUMN_LABELS = {
+    "縣市": "縣市",
+    "鄉鎮市區": "鄉鎮市區",
+    "行政區": "行政區（縣市+鄉鎮市區）",
+    "土地位置建物門牌": "門牌（僅顯示路名）",
+    "交易標的": "交易標的",
+    "主要用途": "主要用途",
+    "房屋類型": "房屋類型",
+    "含車位": "含車位",
+    "季度": "季度",
+    "交易年月日": "交易日期",
+    "移轉層次": "移轉層次",
+    "總樓層數": "總樓層數",
+    "建物型態": "建物型態",
+    "建築完成年月": "建築完成日期",
+    "屋齡": "屋齡（年）",
+    "建物現況格局-房": "房數",
+    "建物現況格局-廳": "廳數",
+    "建物現況格局-衛": "衛浴數",
+    "建物移轉總面積平方公尺": "移轉面積（平方公尺）",
+    "總坪數": "總坪數",
+    "總價元": "總價（元）",
+    "單價元平方公尺": "單價（元/平方公尺）",
+    "單價_萬元每坪": "單價（萬元/坪）",
+}
+
+# 預設勾選的精選欄位（只取資料裡實際存在的欄位，避免舊資料表缺欄位時報錯）
+DEFAULT_COLUMNS = [
+    "縣市", "鄉鎮市區", "土地位置建物門牌", "房屋類型", "含車位", "季度",
+    "交易年月日", "建物型態", "屋齡",
+    "建物現況格局-房", "建物現況格局-廳", "建物現況格局-衛",
+    "總坪數", "單價_萬元每坪",
+]
+
+available_columns = [c for c in filtered.columns if c in COLUMN_LABELS]
+default_columns = [c for c in DEFAULT_COLUMNS if c in available_columns]
+
+selected_columns = st.multiselect(
+    "選擇要顯示的欄位",
+    options=available_columns,
+    default=default_columns,
+    format_func=lambda c: COLUMN_LABELS.get(c, c),
+)
+
+if not selected_columns:
+    st.info("請至少選擇一個欄位才能顯示資料表。")
+else:
+    display_df = filtered[selected_columns].copy()
+
+    if "土地位置建物門牌" in display_df.columns:
+        display_df["土地位置建物門牌"] = display_df["土地位置建物門牌"].apply(extract_road_name)
+    if "交易年月日" in display_df.columns:
+        display_df["交易年月日"] = display_df["交易年月日"].apply(format_roc_date)
+    if "建築完成年月" in display_df.columns:
+        display_df["建築完成年月"] = display_df["建築完成年月"].apply(format_roc_date)
+
+    display_df = display_df.rename(columns=COLUMN_LABELS)
+    st.dataframe(display_df, use_container_width=True)
 
 csv = filtered.to_csv(index=False, encoding="utf-8-sig")
 st.download_button(
-    label="下載篩選後的資料 (CSV，含完整門牌)",
+    label="下載篩選後的完整資料 (CSV)",
     data=csv,
     file_name="篩選後房地產資料.csv",
     mime="text/csv",
