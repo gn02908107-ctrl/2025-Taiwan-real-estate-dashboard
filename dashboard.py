@@ -3,6 +3,8 @@ import sqlite3
 import streamlit as st
 import pandas as pd
 import altair as alt
+import joblib
+import numpy as np
 
 # ------------------------------------------------------------
 # 頁面基本設定
@@ -112,6 +114,30 @@ def strip_parentheses(text):
 
 
 data = load_all_data()
+
+def cn2int(cn):
+    """樓層數字轉阿拉伯數字（同時處理中文數字文字與純數字字串）"""
+    if cn is None:
+        return None
+    cn = str(cn).split("，")[0].split(",")[0].replace("層", "").strip()
+    if cn.isdigit():
+        return int(cn)
+    digits = {"零": 0, "一": 1, "二": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9}
+    if not cn or not all(c in set("零一二三四五六七八九十") for c in cn):
+        return None
+    if cn == "十":
+        return 10
+    if "十" in cn:
+        left, _, right = cn.partition("十")
+        tens = digits.get(left, 1) if left else 1
+        ones = digits.get(right, 0) if right else 0
+        return tens * 10 + ones
+    return digits.get(cn)
+
+data["移轉樓層"] = data["移轉層次"].apply(cn2int)
+data["總樓層數_num"] = data["總樓層數"].apply(cn2int)
+data["樓層比例"] = data["移轉樓層"] / data["總樓層數_num"]
+data.loc[data["樓層比例"] > 1, "樓層比例"] = np.nan
 
 if data.empty:
     st.warning("找不到資料庫檔案,請確認 Database 資料夾（內含 全國房屋實價登錄資料.db）是否與 dashboard.py 放在同一層。")
@@ -410,3 +436,124 @@ st.download_button(
     file_name="篩選後房地產資料.csv",
     mime="text/csv",
 )
+
+# ------------------------------------------------------------
+# 房屋估價工具
+# ------------------------------------------------------------
+st.header("🏷️ 房屋估價工具")
+
+#------載入模型------
+@st.cache_resource
+def load_models():
+    model_中古屋 = joblib.load("model_中古屋_隨機森林.pkl")
+    model_預售屋 = joblib.load("model_預售屋_隨機森林.pkl")
+    return model_中古屋, model_預售屋
+
+model_中古屋, model_預售屋 = load_models()
+
+#------模式切換------
+估價模式 = st.radio("估價模式", ["快速行情查詢", "個人化估價"])
+坪數鎖住 = (估價模式 == "快速行情查詢")
+
+#------欄位類別(下拉選單)------
+房屋類型_輸入 = st.selectbox("房屋類型", ["中古屋", "預售屋"])
+縣市_輸入 = st.selectbox("縣市", counties)
+
+行政區_選項 = data[data["縣市"] == 縣市_輸入]
+行政區_選項 = sorted(行政區_選項["行政區"].dropna().unique())
+行政區_輸入 = st.selectbox("行政區", 行政區_選項)
+
+車位_輸入 = st.selectbox("車位", ["含車位", "不含車位"]) == "含車位"
+建物型態選項 = [
+    t for t in data["建物型態"].dropna().unique()
+    if any(keyword in t for keyword in ["公寓", "華廈", "住宅大樓", "透天厝"])
+]
+建物型態_輸入 = st.selectbox("建物型態", sorted(建物型態選項))
+季度_輸入 = st.selectbox("季度", SEASON_ORDER)
+
+#------總坪數：依模式決定用區間選擇或直接輸入------
+if 估價模式 == "快速行情查詢":
+    坪數區間選項 = ["10坪以下", "11~20坪", "21~30坪", "31~40坪", "41~50坪", "51~60坪", "61坪以上"]
+    坪數區間_輸入 = st.selectbox("總坪數範圍", 坪數區間選項)
+
+    坪數區間對照 = {
+        "10坪以下": (0, 10), "11~20坪": (11, 20), "21~30坪": (21, 30),
+        "31~40坪": (31, 40), "41~50坪": (41, 50), "51~60坪": (51, 60),
+        "61坪以上": (61, 9999),
+    }
+    坪數下限, 坪數上限 = 坪數區間對照[坪數區間_輸入]
+
+    floor_source = data[
+        (data["行政區"] == 行政區_輸入)
+        & (data["房屋類型"] == 房屋類型_輸入)
+        & (data["建物型態"] == 建物型態_輸入)
+        & (data["總坪數"] >= 坪數下限)
+        & (data["總坪數"] <= 坪數上限)
+    ]
+
+    if len(floor_source) == 0:
+        st.warning("這個地區/房屋類型/坪數區間組合資料不足，無法估價。")
+        st.stop()
+
+    總坪數_輸入 = floor_source["總坪數"].median()
+    坪數說明 = f"（依您選擇的「{坪數區間_輸入}」區間，系統帶入實際中位數 {總坪數_輸入:.1f} 坪）"
+
+else:  # 個人化估價
+    floor_source = data[
+        (data["行政區"] == 行政區_輸入)
+        & (data["房屋類型"] == 房屋類型_輸入)
+        & (data["建物型態"] == 建物型態_輸入)
+    ]
+
+    if len(floor_source) == 0:
+        st.warning("這個地區/房屋類型組合資料不足，無法估價。")
+        st.stop()
+
+    總坪數_輸入 = st.number_input("總坪數", min_value=1.0, value=30.0)
+    坪數說明 = ""
+
+#------其餘欄位自動帶入（跟坪數無關，兩種模式都一樣）------
+房_預設 = floor_source["建物現況格局-房"].median()
+廳_預設 = floor_source["建物現況格局-廳"].median()
+衛_預設 = floor_source["建物現況格局-衛"].median()
+移轉樓層_預設 = floor_source["移轉樓層"].median()
+總樓層數_預設 = floor_source["總樓層數_num"].median()
+屋齡_預設 = floor_source["屋齡"].median() if 房屋類型_輸入 == "中古屋" else None
+
+caption_text = (
+    f"系統帶入：{房_預設:.0f}房{廳_預設:.0f}廳{衛_預設:.0f}衛、"
+    f"第{移轉樓層_預設:.0f}層／共{總樓層數_預設:.0f}層"
+)
+if 屋齡_預設 is not None:
+    caption_text += f"、屋齡{屋齡_預設:.0f}年"
+if 坪數說明:
+    caption_text += "\n" + 坪數說明
+st.caption(caption_text)
+
+#------按下按鈕才觸發預測------
+if st.button("開始估價"):
+    樓層比例_輸入 = 移轉樓層_預設 / 總樓層數_預設
+
+    input_data = {
+        "行政區": [行政區_輸入],
+        "含車位": [車位_輸入],
+        "季度": [季度_輸入],
+        "總坪數": [總坪數_輸入],
+        "建物型態": [建物型態_輸入],
+        "建物現況格局-房": [房_預設],
+        "建物現況格局-廳": [廳_預設],
+        "建物現況格局-衛": [衛_預設],
+        "移轉樓層": [移轉樓層_預設],
+        "總樓層數_num": [總樓層數_預設],
+        "樓層比例": [樓層比例_輸入],
+    }
+    if 房屋類型_輸入 == "中古屋":
+        input_data["屋齡"] = [屋齡_預設]
+
+    input_df = pd.DataFrame(input_data)
+
+    模型 = model_中古屋 if 房屋類型_輸入 == "中古屋" else model_預售屋
+    預測單價 = 模型.predict(input_df)[0]
+
+    st.success(f"預估單價：約 {預測單價:.1f} 萬元/坪")
+    st.caption(f"預估總價：約 {預測單價 * 總坪數_輸入:.0f} 萬元")
