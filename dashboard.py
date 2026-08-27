@@ -58,6 +58,12 @@ def load_all_data():
     # 有些行政區名稱會橫跨多個縣市（例如台北市、基隆市都有中正區）,
     # 用「縣市+鄉鎮市區」組成不會混淆的完整行政區名稱,供圖表分組使用
     result["行政區"] = result["縣市"] + result["鄉鎮市區"]
+
+    # 重複值很多的文字欄位轉成 category 型態，減少記憶體用量
+    for col in ["縣市", "鄉鎮市區", "行政區", "房屋類型", "建物型態", "季度", "交易標的", "主要用途"]:
+                if col in result.columns:
+                    result[col] = result[col].astype("category")
+
     return result
 
 
