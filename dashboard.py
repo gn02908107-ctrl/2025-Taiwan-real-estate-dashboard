@@ -308,7 +308,7 @@ trend_data = (
     .mean()
     .reset_index()
 )
-trend_data["群組"] = trend_data["行政區"] + " - " + trend_data["房屋類型"]
+trend_data["群組"] = trend_data["行政區"].astype(str) + " - " + trend_data["房屋類型"].astype(str)
 
 trend_color = alt.Color(
     "群組:N",
