@@ -19,7 +19,7 @@
 
 ## 2. XGBoost 超參數調整歷程
 
-XGBoost 的調參不是一次到位，過程本身比最終數字更值得記錄（完整程式碼見
+XGBoost 的調參不是一次到位（完整程式碼見
 [regression_xgboost.py](regression_xgboost.py)）：
 
 1. **窄範圍搜尋**（`n_estimators`∈{100,200,300}、`max_depth`∈{3,4,5,6}、`learning_rate`∈{0.05,0.1,0.2}、
