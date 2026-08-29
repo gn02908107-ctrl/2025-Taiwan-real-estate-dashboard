@@ -4,3 +4,4 @@ altair
 scikit-learn
 joblib
 numpy
+xgboost
