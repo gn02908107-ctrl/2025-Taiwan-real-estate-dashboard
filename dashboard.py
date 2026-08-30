@@ -561,5 +561,16 @@ if st.button("開始估價"):
     模型 = model_中古屋 if 房屋類型_輸入 == "中古屋" else model_預售屋
     預測單價 = 模型.predict(input_df)[0]
 
-    st.success(f"預估單價：約 {預測單價:.1f} 萬元/坪")
-    st.caption(f"預估總價：約 {預測單價 * 總坪數_輸入:.0f} 萬元")
+    st.markdown(
+        f"""
+        <div style="background-color:#D1E7DD; border-radius:10px; padding:22px 26px; margin-top:8px;">
+            <div style="font-size:30px; font-weight:700; color:#0F5132; line-height:1.4;">
+                預估單價：約 {預測單價:.1f} 萬元/坪
+            </div>
+            <div style="font-size:22px; color:#0F5132; margin-top:8px;">
+                預估總價：約 {預測單價 * 總坪數_輸入:.0f} 萬元
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
