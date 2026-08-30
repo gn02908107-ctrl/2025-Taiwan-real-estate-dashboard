@@ -168,13 +168,18 @@ for house_type, cfg in MODEL_CONFIGS.items():
     xgb_pred = xgb_pipe.predict(X_test)
     xgb_pred_train = xgb_pipe.predict(X_train)
 
+    lr_pred_train = lr_pipe.predict(X_train)
+    rf_pred_train = rf_pipe.predict(X_train)
+
     fitted[house_type] = {
         "lr_pipe": lr_pipe, "lr_pred": lr_pred,
         "rf_pipe": rf_pipe, "rf_pred": rf_pred,
         "xgb_pipe": xgb_pipe, "xgb_pred": xgb_pred,
         "y_test": y_test, "y_train": y_train,
         "lr_r2": r2_score(y_test, lr_pred),
+        "lr_r2_train": r2_score(y_train, lr_pred_train),
         "rf_r2": r2_score(y_test, rf_pred),
+        "rf_r2_train": r2_score(y_train, rf_pred_train),
         "xgb_r2": r2_score(y_test, xgb_pred),
         "xgb_r2_train": r2_score(y_train, xgb_pred_train),
     }
@@ -184,38 +189,36 @@ for house_type, cfg in MODEL_CONFIGS.items():
 
 
 # ------------------------------------------------------------
-# 1. 公平對照表（從 model_comparison_v2.csv 篩選出來）
+# 1. 公平對照表——三個模型都直接用這次剛訓練好的 pipeline 現算指標，
+#    不依賴 model_comparison_v2.csv（那份是 regression_model_v2.py 產生的，
+#    這裡若讀它，台東縣資料清乾淨後只有 XGBoost 會反映最新結果，
+#    線性迴歸/隨機森林卻還是舊資料的數字，造成同一張表新舊資料混雜）。
 # ------------------------------------------------------------
-FAIR_PAIRS = [
-    ("中古屋-v2（完整特徵）", "線性迴歸"),
-    ("中古屋-v2調參後（正式模型）", "隨機森林（min_samples_leaf=5）"),
-    ("預售屋-v2（完整特徵）", "線性迴歸"),
-    ("預售屋-v2（完整特徵）", "隨機森林"),
+MODEL_ROW_SPECS = [
+    ("線性迴歸", "lr", lambda ht: f"{ht}-v2（完整特徵）", lambda ht: "線性迴歸"),
+    ("隨機森林", "rf",
+     lambda ht: f"{ht}-v2調參後（正式模型）" if ht == "中古屋" else f"{ht}-v2（完整特徵）",
+     lambda ht: "隨機森林（min_samples_leaf=5）" if ht == "中古屋" else "隨機森林"),
+    ("XGBoost調參後", "xgb", lambda ht: f"{ht}-v2調參後（XGBoost）", lambda ht: "XGBoost（調參後）"),
 ]
 
-full_comparison = pd.read_csv("model_comparison_v2.csv", encoding="utf-8-sig")
-mask = full_comparison.apply(lambda r: (r["版本"], r["模型"]) in FAIR_PAIRS, axis=1)
-fair_table = full_comparison[mask].copy()
-fair_table.insert(0, "房屋類型", fair_table["版本"].str.extract(r"^(中古屋|預售屋)"))
-fair_table.insert(1, "模型類型", fair_table["模型"].apply(lambda m: "線性迴歸" if "線性" in m else "隨機森林"))
-
-# 把 XGBoost（調參後）也併入同一張公平對照表——用剛剛訓練好的 xgb_pipe 現算指標，
-# 不是重新搜尋超參數，只是用已經定案的參數重新訓練、評估。
-xgb_extra_rows = []
+fair_rows = []
 for house_type in MODEL_CONFIGS:
     info = fitted[house_type]
-    r2_train = info["xgb_r2_train"]
-    r2_test = info["xgb_r2"]
-    rmse = np.sqrt(mean_squared_error(info["y_test"], info["xgb_pred"]))
-    mae = mean_absolute_error(info["y_test"], info["xgb_pred"])
-    xgb_extra_rows.append({
-        "房屋類型": house_type, "模型類型": "XGBoost調參後",
-        "版本": f"{house_type}-v2調參後（XGBoost）", "模型": "XGBoost（調參後）",
-        "訓練R2": round(r2_train, 3), "測試R2": round(r2_test, 3),
-        "R2差距": round(r2_train - r2_test, 3), "RMSE": round(rmse, 2), "MAE": round(mae, 2),
-    })
+    for model_type, key, version_fn, model_fn in MODEL_ROW_SPECS:
+        r2_train = info[f"{key}_r2_train"]
+        r2_test = info[f"{key}_r2"]
+        pred = info[f"{key}_pred"]
+        rmse = np.sqrt(mean_squared_error(info["y_test"], pred))
+        mae = mean_absolute_error(info["y_test"], pred)
+        fair_rows.append({
+            "房屋類型": house_type, "模型類型": model_type,
+            "版本": version_fn(house_type), "模型": model_fn(house_type),
+            "訓練R2": round(r2_train, 3), "測試R2": round(r2_test, 3),
+            "R2差距": round(r2_train - r2_test, 3), "RMSE": round(rmse, 2), "MAE": round(mae, 2),
+        })
 
-fair_table = pd.concat([fair_table, pd.DataFrame(xgb_extra_rows)], ignore_index=True)
+fair_table = pd.DataFrame(fair_rows)
 model_order = {"線性迴歸": 0, "隨機森林": 1, "XGBoost調參後": 2}
 fair_table["_順序"] = fair_table["模型類型"].map(model_order)
 fair_table = fair_table.sort_values(["房屋類型", "_順序"]).drop(columns="_順序").reset_index(drop=True)
@@ -365,9 +368,29 @@ pre_lr, pre_rf, pre_xgb = fmt_row("預售屋", "線性迴歸"), fmt_row("預售�
 
 report = f"""# 線性迴歸 vs 隨機森林 vs XGBoost：模型比較報告
 
-資料範圍：全國 22 縣市，v2 完整特徵集（地區、車位、季度、坪數、建物型態、格局、樓層資訊；
+資料範圍：全國 21 縣市，v2 完整特徵集（地區、車位、季度、坪數、建物型態、格局、樓層資訊；
 中古屋額外加入屋齡，預售屋因屋齡結構性全缺而不採用）。以下為「公平對照」——
 三個模型使用完全相同的特徵集，各自套用其正式定案的超參數設定。
+
+## 資料附註：台東縣命名重複問題（已於 2026-08-30 修正）
+
+**發現過程**：本報告初版開頭寫「全國 22 縣市」，是直接採用 `data['縣市'].nunique()` 的結果。
+但台灣行政區劃裡這份資料實際涵蓋的縣市只有 21 個（未涵蓋連江縣），22 這個數字啟人疑竇，
+進一步比對後發現資料庫縣市欄位裡「台東縣」與「臺東縣」被當成兩個不同字串。
+
+**驗證過程**：查詢資料表名稱後發現，S1~S3 的台東縣資料表一律用「臺東縣」，只有 S4
+同時存在「台東縣」與「臺東縣」兩組、共 8 張表（不含車位／含車位 × 中古屋／預售屋）。
+逐一比對這 4 對表格的筆數與內容（`DataFrame.equals()`），確認完全 byte-for-byte 相同——
+不是兩批不同的交易紀錄，是同一批資料被存了兩次，只是縣市欄位用字不同。以此為契機，
+進一步把「台→臺」正規化後比對全部 332 張表的縣市字串，確認台北市、台中市、台南市等
+其他縣市都沒有類似的寫法不一致問題，台東縣是單一事件。
+
+**修正方式**：備份原始資料庫後，刪除 S4 底下 4 張用「台東縣」命名的重複表格，只保留
+跟 S1~S3 一致的「臺東縣」版本，並執行 `VACUUM` 回收空間。修正後
+`data['縣市'].nunique()` 正確等於 21，資料表總數從 336 降為 332，S4 台東縣的交易筆數
+沒有任何流失。本報告與其餘產出物（`report_fair_comparison.csv`、兩個 `.pkl` 模型檔、
+下方所有圖表）皆已用修正後的資料重新訓練——train_test_split 的 `random_state=42`
+維持不變，唯一改變的變數是資料本身變乾淨了，不會混入其他變因。
 
 ## 1. 公平對照表
 
@@ -387,6 +410,12 @@ report = f"""# 線性迴歸 vs 隨機森林 vs XGBoost：模型比較報告
 XGBoost 的調參不是一次到位，過程本身比最終數字更值得記錄（完整程式碼見
 [regression_xgboost.py](regression_xgboost.py)）：
 
+> **時間點提醒**：第 1~3 步的所有數字，都是在台東縣命名重複問題（見上方「資料附註」）
+> 修正**之前**、用當時還沒清乾淨的資料調參時測得的紀錄，目的是記錄「怎麼發現交叉驗證選贏家
+> 會選到過擬合解」這個方法論探索過程，**不代表目前正式模型的表現**。這幾步的數字彼此之間
+> （用的都是同一份舊資料）互相比較是公平的，但不能拿來跟第 1 節公平對照表的數字比較——
+> 那是修正後的資料重新訓練出來的，比較基準不同。
+
 1. **窄範圍搜尋**（`n_estimators`∈{{100,200,300}}、`max_depth`∈{{3,4,5,6}}、`learning_rate`∈{{0.05,0.1,0.2}}、
    `subsample`/`colsample_bytree`∈{{0.6,0.8,1.0}}、`min_child_weight`∈{{1,3,5,10}}，
    `RandomizedSearchCV`、`n_iter=10`、`cv=3`）：中古屋測試 R²=0.740、差距 0.044；
@@ -404,10 +433,11 @@ XGBoost 的調參不是一次到位，過程本身比最終數字更值得記錄
 4. **改變選贏家的規則**：不再直接用 `RandomizedSearchCV.best_params_`（單純看交叉驗證平均測試分數），
    改成加上 `return_train_score=True`，從 `cv_results_` 算出每組候選「交叉驗證訓練分數－測試分數」，
    篩選出差距 ≤0.1 的候選，再從中挑測試分數最高的一組。套用這個規則後，中古屋選出
-   `max_depth=5`、`min_child_weight=10`、`subsample=1.0` 這組，測試 R²={used_xgb['測試R2']:.3f}、
-   差距 {used_xgb['R2差距']:.3f}——過擬合問題解決，代價是比原本被交叉驗證選中的贏家
-   （測試R²=0.705）低了一點點；預售屋維持第 3 步找到的組合不變（它本來就滿足新規則），
-   測試 R²={pre_xgb['測試R2']:.3f}、差距 {pre_xgb['R2差距']:.3f}。
+   `max_depth=5`、`min_child_weight=10`、`subsample=1.0` 這組——在當時同一份舊資料上，
+   過擬合差距從第 2 步的 0.167 降到 0.045，問題解決；預售屋維持第 3 步找到的組合不變
+   （它本來就滿足新規則）。這兩組參數就是目前正式採用的 XGBoost 設定，後續已經用修正後的
+   21 縣市資料重新訓練，實際測試 R² 與差距請見第 1 節公平對照表（中古屋
+   {used_xgb['測試R2']:.3f}／預售屋 {pre_xgb['測試R2']:.3f}）。
 
 **這個過程暴露的重點發現**：`RandomizedSearchCV` 預設用交叉驗證平均測試分數選贏家，這個分數只看
 「準不準」，不看「訓練分數跟測試分數差多少」。一組參數可以在交叉驗證的平均測試分數上表現不錯，
