@@ -147,6 +147,8 @@
    ```
 4. 瀏覽器會自動開啟 `http://localhost:8501`
 
+提醒:如果本機執行時遇到 CERTIFICATE_VERIFY_FAILED 這類 TLS 憑證錯誤,額外執行 pip install truststore 即可解決
+
 ## 未來可以延伸的方向
 
 - 加入地圖視覺化（依經緯度標示交易熱點）
