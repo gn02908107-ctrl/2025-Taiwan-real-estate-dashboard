@@ -157,17 +157,18 @@ SEASON_ORDER = ["S1", "S2", "S3", "S4"]
 # 側邊欄篩選條件
 # ------------------------------------------------------------
 st.sidebar.header("篩選條件")
+st.sidebar.caption("所有條件預設為未選擇，請先選好條件，「圖表分析」才會顯示圖表。")
 
+# 所有篩選條件預設都不選（多選為空、單選為 index=None），由使用者自己決定要看什麼；
+# 全部選好之前，圖表分析頁籤只顯示還缺哪些條件（見 render_charts）
 seasons = sorted(data["季度"].dropna().unique())
 selected_seasons = st.sidebar.multiselect(
-    "選擇季度", seasons, default=seasons
+    "選擇季度", seasons, default=[], placeholder="請選擇季度"
 )
 
-# 縣市篩選（預設只選台北市,避免一次載入全國 368 個行政區造成圖表過於雜亂）
 counties = sorted(data["縣市"].dropna().unique())
-default_county = ["台北市"] if "台北市" in counties else counties[:1]
 selected_counties = st.sidebar.multiselect(
-    "選擇縣市", counties, default=default_county
+    "選擇縣市", counties, default=[], placeholder="請選擇縣市"
 )
 
 # 行政區選項只列出「目前選擇的縣市」底下的行政區,避免不同縣市同名行政區混淆
@@ -175,25 +176,42 @@ county_scoped = data[data["縣市"].isin(selected_counties)]
 districts = sorted(county_scoped["行政區"].dropna().unique())
 district_labels = {d: d for d in districts}  # 顯示用（已含縣市，不需再轉換）
 
-select_all_districts = st.sidebar.checkbox("全選行政區", value=True)
+select_all_districts = st.sidebar.checkbox("全選行政區", value=False)
 if select_all_districts:
     selected_districts = districts
 else:
-    selected_districts = st.sidebar.multiselect("選擇行政區", districts)
+    selected_districts = st.sidebar.multiselect(
+        "選擇行政區", districts, default=[], placeholder="請選擇行政區"
+    )
 
 house_type_option = st.sidebar.radio(
-    "房屋類型", ["全部", "只看中古屋", "只看預售屋"]
+    "房屋類型", ["全部", "只看中古屋", "只看預售屋"], index=None
 )
 if house_type_option == "只看中古屋":
     house_types = ["中古屋"]
 elif house_type_option == "只看預售屋":
     house_types = ["預售屋"]
-else:
+elif house_type_option == "全部":
     house_types = ["中古屋", "預售屋"]
+else:  # 尚未選擇
+    house_types = []
 
 car_option = st.sidebar.radio(
-    "車位篩選", ["全部", "只看含車位", "只看不含車位"]
+    "車位篩選", ["全部", "只看含車位", "只看不含車位"], index=None
 )
+
+# 還沒選的條件（全部選好才會畫圖表）
+missing_filters = []
+if not selected_seasons:
+    missing_filters.append("季度")
+if not selected_counties:
+    missing_filters.append("縣市")
+if not selected_districts:
+    missing_filters.append("行政區（可勾選「全選行政區」）")
+if house_type_option is None:
+    missing_filters.append("房屋類型")
+if car_option is None:
+    missing_filters.append("車位篩選")
 
 filtered = data[
     data["縣市"].isin(selected_counties)
@@ -218,7 +236,16 @@ if qa_available():
     tab_names.append("💬 問問看")
 tabs = st.tabs(tab_names)
 
-with tabs[0]:
+def render_charts():
+    """圖表分析頁籤的內容。側邊欄條件還沒選齊時只顯示提示，選齊才畫圖。
+
+    包成函式（而不是直接寫在 with tabs[0] 裡）是為了能用 return 提前結束，
+    不能用 st.stop()：它會中斷整個腳本，後面的頁籤就不會渲染。
+    """
+    if missing_filters:
+        st.info("請先在左側選擇：" + "、".join(missing_filters) + "。選好後就會顯示圖表。")
+        return
+
     # ------------------------------------------------------------
     # 交易筆數佔比圓餅圖
     # 選擇「單一縣市」時 -> 自動切換成該縣市的行政區佔比
@@ -250,7 +277,7 @@ with tabs[0]:
     st.subheader(chart_title)
 
     pie_counts = (
-        pie_source.groupby(group_field).size().reset_index(name="交易筆數")
+        pie_source.groupby(group_field, observed=True).size().reset_index(name="交易筆數")
     )
     total_count = pie_counts["交易筆數"].sum()
     pie_counts["百分比標籤"] = (
@@ -289,7 +316,7 @@ with tabs[0]:
     st.subheader("各行政區平均單價（萬元/坪）")
 
     district_avg = (
-        filtered.groupby("行政區")["單價_萬元每坪"]
+        filtered.groupby("行政區", observed=True)["單價_萬元每坪"]
         .mean()
         .sort_values(ascending=False)
         .reset_index()
@@ -316,7 +343,7 @@ with tabs[0]:
     st.subheader("S1~S4 平均單價走勢（萬元/坪）")
 
     trend_data = (
-        filtered.groupby(["季度", "行政區", "房屋類型"])["單價_萬元每坪"]
+        filtered.groupby(["季度", "行政區", "房屋類型"], observed=True)["單價_萬元每坪"]
         .mean()
         .reset_index()
     )
@@ -362,7 +389,7 @@ with tabs[0]:
     st.subheader("中古屋 vs 預售屋 平均單價比較")
 
     type_avg = (
-        filtered.groupby(["行政區", "房屋類型"])["單價_萬元每坪"]
+        filtered.groupby(["行政區", "房屋類型"], observed=True)["單價_萬元每坪"]
         .mean()
         .reset_index()
     )
@@ -462,9 +489,9 @@ with tabs[0]:
 #------載入模型------
 @st.cache_resource
 def load_models():
-    model_中古屋 = joblib.load("model_中古屋_隨機森林.pkl")
-    model_預售屋 = joblib.load("model_預售屋_隨機森林.pkl")
-    return model_中古屋, model_預售屋
+    model_resale = joblib.load("model_中古屋_隨機森林.pkl")
+    model_presale = joblib.load("model_預售屋_隨機森林.pkl")
+    return model_resale, model_presale
 
 
 def render_estimator():
@@ -475,126 +502,154 @@ def render_estimator():
     """
     st.header("🏷️ 房屋估價工具")
 
-    model_中古屋, model_預售屋 = load_models()
+    model_resale, model_presale = load_models()
 
+    #------所有選項預設都不選（index=None），選齊之後才會估價------
     #------模式切換------
-    估價模式 = st.radio("估價模式", ["快速行情查詢", "個人化估價"])
-    坪數鎖住 = (估價模式 == "快速行情查詢")
+    valuation_mode = st.radio("估價模式", ["快速行情查詢", "個人化估價"], index=None)
 
     #------欄位類別(下拉選單)------
-    房屋類型_輸入 = st.selectbox("房屋類型", ["中古屋", "預售屋"])
-    縣市_輸入 = st.selectbox("縣市", counties)
+    house_type_input = st.selectbox("房屋類型", ["中古屋", "預售屋"], index=None, placeholder="請選擇房屋類型")
+    county_input = st.selectbox("縣市", counties, index=None, placeholder="請選擇縣市")
 
-    行政區_選項 = data[data["縣市"] == 縣市_輸入]
-    行政區_選項 = sorted(行政區_選項["行政區"].dropna().unique())
-    行政區_輸入 = st.selectbox("行政區", 行政區_選項)
+    if county_input is None:
+        district_options = []
+    else:
+        district_options = data[data["縣市"] == county_input]
+        district_options = sorted(district_options["行政區"].dropna().unique())
+    district_input = st.selectbox(
+        "行政區", district_options, index=None,
+        placeholder="請先選擇縣市" if county_input is None else "請選擇行政區",
+    )
 
-    車位_輸入 = st.selectbox("車位", ["含車位", "不含車位"]) == "含車位"
-    建物型態選項 = [
+    parking_choice = st.selectbox("車位", ["含車位", "不含車位"], index=None, placeholder="請選擇車位")
+    has_parking = (parking_choice == "含車位")
+    building_type_options = [
         t for t in data["建物型態"].dropna().unique()
         if any(keyword in t for keyword in ["公寓", "華廈", "住宅大樓", "透天厝"])
     ]
-    建物型態_輸入 = st.selectbox("建物型態", sorted(建物型態選項))
-    季度_輸入 = st.selectbox("季度", SEASON_ORDER)
+    building_type_input = st.selectbox("建物型態", sorted(building_type_options), index=None, placeholder="請選擇建物型態")
+    season_input = st.selectbox("季度", SEASON_ORDER, index=None, placeholder="請選擇季度")
 
-    #------總坪數：依模式決定用區間選擇或直接輸入------
-    if 估價模式 == "快速行情查詢":
-        坪數區間選項 = ["10坪以下", "11~20坪", "21~30坪", "31~40坪", "41~50坪", "51~60坪", "61坪以上"]
-        坪數區間_輸入 = st.selectbox("總坪數範圍", 坪數區間選項)
+    #------總坪數：依模式決定用區間選擇或直接輸入（也是預設不選）------
+    area_range_input = None
+    total_area_input = None
+    if valuation_mode == "快速行情查詢":
+        area_range_options = ["10坪以下", "11~20坪", "21~30坪", "31~40坪", "41~50坪", "51~60坪", "61坪以上"]
+        area_range_input = st.selectbox("總坪數範圍", area_range_options, index=None, placeholder="請選擇總坪數範圍")
+    elif valuation_mode == "個人化估價":
+        total_area_input = st.number_input("總坪數", min_value=1.0, value=None, placeholder="請輸入總坪數")
 
-        坪數區間對照 = {
+    #------還沒選齊就只顯示缺哪些，不估價------
+    missing_inputs = [
+        field_name for field_name, field_value in [
+            ("估價模式", valuation_mode), ("房屋類型", house_type_input), ("縣市", county_input),
+            ("行政區", district_input), ("車位", parking_choice), ("建物型態", building_type_input),
+            ("季度", season_input),
+            ("總坪數範圍" if valuation_mode == "快速行情查詢" else "總坪數",
+             area_range_input if valuation_mode == "快速行情查詢" else total_area_input),
+        ] if field_value is None
+    ]
+    if missing_inputs:
+        st.info("請先選擇：" + "、".join(missing_inputs) + "。選齊後才會顯示估價按鈕。")
+        return
+
+    if valuation_mode == "快速行情查詢":
+        area_range_bounds = {
             "10坪以下": (0, 10), "11~20坪": (11, 20), "21~30坪": (21, 30),
             "31~40坪": (31, 40), "41~50坪": (41, 50), "51~60坪": (51, 60),
             "61坪以上": (61, 9999),
         }
-        坪數下限, 坪數上限 = 坪數區間對照[坪數區間_輸入]
+        area_min, area_max = area_range_bounds[area_range_input]
 
         floor_source = data[
-            (data["行政區"] == 行政區_輸入)
-            & (data["房屋類型"] == 房屋類型_輸入)
-            & (data["建物型態"] == 建物型態_輸入)
-            & (data["總坪數"] >= 坪數下限)
-            & (data["總坪數"] <= 坪數上限)
+            (data["行政區"] == district_input)
+            & (data["房屋類型"] == house_type_input)
+            & (data["建物型態"] == building_type_input)
+            & (data["總坪數"] >= area_min)
+            & (data["總坪數"] <= area_max)
         ]
 
         if len(floor_source) == 0:
             st.warning("這個地區/房屋類型/坪數區間組合資料不足，無法估價。")
             return
 
-        總坪數_輸入 = floor_source["總坪數"].median()
-        坪數說明 = f"（依您選擇的「{坪數區間_輸入}」區間，系統帶入實際中位數 {總坪數_輸入:.1f} 坪）"
+        total_area_input = floor_source["總坪數"].median()
+        area_note = f"（依您選擇的「{area_range_input}」區間，系統帶入實際中位數 {total_area_input:.1f} 坪）"
 
     else:  # 個人化估價
         floor_source = data[
-            (data["行政區"] == 行政區_輸入)
-            & (data["房屋類型"] == 房屋類型_輸入)
-            & (data["建物型態"] == 建物型態_輸入)
+            (data["行政區"] == district_input)
+            & (data["房屋類型"] == house_type_input)
+            & (data["建物型態"] == building_type_input)
         ]
 
         if len(floor_source) == 0:
             st.warning("這個地區/房屋類型組合資料不足，無法估價。")
             return
 
-        總坪數_輸入 = st.number_input("總坪數", min_value=1.0, value=30.0)
-        坪數說明 = ""
+        area_note = ""
 
     #------其餘欄位自動帶入（跟坪數無關，兩種模式都一樣）------
-    房_預設 = floor_source["建物現況格局-房"].median()
-    廳_預設 = floor_source["建物現況格局-廳"].median()
-    衛_預設 = floor_source["建物現況格局-衛"].median()
-    移轉樓層_預設 = floor_source["移轉樓層"].median()
-    總樓層數_預設 = floor_source["總樓層數_num"].median()
-    屋齡_預設 = floor_source["屋齡"].median() if 房屋類型_輸入 == "中古屋" else None
+    default_rooms = floor_source["建物現況格局-房"].median()
+    default_living_rooms = floor_source["建物現況格局-廳"].median()
+    default_bathrooms = floor_source["建物現況格局-衛"].median()
+    default_floor = floor_source["移轉樓層"].median()
+    default_total_floors = floor_source["總樓層數_num"].median()
+    default_house_age = floor_source["屋齡"].median() if house_type_input == "中古屋" else None
 
     caption_text = (
-        f"系統帶入：{房_預設:.0f}房{廳_預設:.0f}廳{衛_預設:.0f}衛、"
-        f"第{移轉樓層_預設:.0f}層／共{總樓層數_預設:.0f}層"
+        f"系統帶入：{default_rooms:.0f}房{default_living_rooms:.0f}廳{default_bathrooms:.0f}衛、"
+        f"第{default_floor:.0f}層／共{default_total_floors:.0f}層"
     )
-    if 屋齡_預設 is not None:
-        caption_text += f"、屋齡{屋齡_預設:.0f}年"
-    if 坪數說明:
-        caption_text += "\n" + 坪數說明
+    if default_house_age is not None:
+        caption_text += f"、屋齡{default_house_age:.0f}年"
+    if area_note:
+        caption_text += "\n" + area_note
     st.caption(caption_text)
 
     #------按下按鈕才觸發預測------
     if st.button("開始估價"):
-        樓層比例_輸入 = 移轉樓層_預設 / 總樓層數_預設
+        floor_ratio_input = default_floor / default_total_floors
 
         input_data = {
-            "行政區": [行政區_輸入],
-            "含車位": [車位_輸入],
-            "季度": [季度_輸入],
-            "總坪數": [總坪數_輸入],
-            "建物型態": [建物型態_輸入],
-            "建物現況格局-房": [房_預設],
-            "建物現況格局-廳": [廳_預設],
-            "建物現況格局-衛": [衛_預設],
-            "移轉樓層": [移轉樓層_預設],
-            "總樓層數_num": [總樓層數_預設],
-            "樓層比例": [樓層比例_輸入],
+            "行政區": [district_input],
+            "含車位": [has_parking],
+            "季度": [season_input],
+            "總坪數": [total_area_input],
+            "建物型態": [building_type_input],
+            "建物現況格局-房": [default_rooms],
+            "建物現況格局-廳": [default_living_rooms],
+            "建物現況格局-衛": [default_bathrooms],
+            "移轉樓層": [default_floor],
+            "總樓層數_num": [default_total_floors],
+            "樓層比例": [floor_ratio_input],
         }
-        if 房屋類型_輸入 == "中古屋":
-            input_data["屋齡"] = [屋齡_預設]
+        if house_type_input == "中古屋":
+            input_data["屋齡"] = [default_house_age]
 
         input_df = pd.DataFrame(input_data)
 
-        模型 = model_中古屋 if 房屋類型_輸入 == "中古屋" else model_預售屋
-        預測單價 = 模型.predict(input_df)[0]
+        model = model_resale if house_type_input == "中古屋" else model_presale
+        predicted_unit_price = model.predict(input_df)[0]
 
         st.markdown(
             f"""
             <div style="background-color:#D1E7DD; border-radius:10px; padding:22px 26px; margin-top:8px;">
                 <div style="font-size:30px; font-weight:700; color:#0F5132; line-height:1.4;">
-                    預估單價：約 {預測單價:.1f} 萬元/坪
+                    預估單價：約 {predicted_unit_price:.1f} 萬元/坪
                 </div>
                 <div style="font-size:22px; color:#0F5132; margin-top:8px;">
-                    預估總價：約 {預測單價 * 總坪數_輸入:.0f} 萬元
+                    預估總價：約 {predicted_unit_price * total_area_input:.0f} 萬元
                 </div>
             </div>
             """,
             unsafe_allow_html=True,
         )
 
+
+with tabs[0]:
+    render_charts()
 
 with tabs[1]:
     render_estimator()
