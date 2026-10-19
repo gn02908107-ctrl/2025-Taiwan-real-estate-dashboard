@@ -10,8 +10,8 @@ from qa_ui import qa_available, render_qa_section
 # ------------------------------------------------------------
 # 頁面基本設定
 # ------------------------------------------------------------
-st.set_page_config(page_title="全國房地產交易分析", layout="wide")
-st.title("🏠 114年度全國房地產交易分析")
+st.set_page_config(page_title="全國房地產智慧分析平台", layout="wide")
+st.title("🏠 全國房地產智慧分析平台")
 st.caption("資料來源:內政部不動產交易實價查詢服務網（實價登錄）")
 
 DB_PATH = "Database/全國房屋實價登錄資料.db"
